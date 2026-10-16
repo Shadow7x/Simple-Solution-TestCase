@@ -1,11 +1,195 @@
-# Simple Solution Testcase
+# Crypto Price Tracker
 
-## Overview
-Deribit price fetcher and FastAPI service with PostgreSQL backend.
+Сервис для получения и хранения цен криптовалют BTC и ETH в USD с использованием публичного API биржи Deribit.
 
-## Design Decisions
-- FastAPI for async API and auto documentation
-- Celery for periodic tasks
-- PostgreSQL for persistent storage
-- aiohttp for async HTTP client
-- Docker for containerized deployment
+Приложение периодически получает цены, сохраняет их в PostgreSQL и предоставляет REST API для получения сохранённых данных.
+
+## Технологии
+
+- **Python** — основной язык разработки.
+- **FastAPI** — REST API.
+- **SQLAlchemy** — работа с базой данных.
+- **PostgreSQL** — хранение истории цен.
+- **Celery** — выполнение фоновых задач.
+- **Celery Beat** — периодический запуск задач.
+- **Redis** — брокер сообщений Celery.
+- **uv** — управление зависимостями Python.
+- **Docker Compose** — запуск приложения и инфраструктуры.
+
+## Требования
+
+Перед запуском установите:
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Docker Compose (входит в Docker Desktop)
+
+## Установка и запуск
+
+
+### 1. Настройка переменных окружения
+
+В корне проекта находится файл `.env.example` с примером конфигурации.
+
+Создайте на его основе рабочий `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Пример содержимого `.env.example`:
+
+```dotenv
+# PostgreSQL
+POSTGRES_DB=mydb
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=change_me
+
+# Database connection
+DATABASE_URL=postgresql://postgres:change_me@db:5432/mydb
+
+# Redis
+REDIS_URL=redis://redis:6379/0
+```
+
+**Важно:**
+- Укажите собственный пароль PostgreSQL в `.env`.
+- Значения `POSTGRES_DB`, `POSTGRES_USER` и `POSTGRES_PASSWORD` должны соответствовать параметрам подключения к базе данных.
+- `DATABASE_URL` внутри Docker Compose должен использовать имя сервиса PostgreSQL в качестве хоста, например `db`, а не `localhost`.
+- `REDIS_URL` должен указывать на Redis внутри Docker-сети, например `redis://redis:6379/0`.
+- Имена переменных в примере должны совпадать с теми, которые используются в конфигурации приложения и `docker-compose.yml`. Если проект использует другие имена, укажите их в обоих файлах.
+- Не добавляйте `.env` с секретами в Git. В репозитории следует хранить `.env.example`.
+
+### 2. Запуск проекта
+
+Из корневой директории выполните:
+
+```bash
+docker compose up --build -d
+```
+
+Команда соберёт образы и запустит сервисы, описанные в `docker-compose.yml`.
+
+Проверить состояние контейнеров:
+
+```bash
+docker compose ps
+```
+
+Посмотреть логи всех сервисов:
+
+```bash
+docker compose logs -f
+```
+
+Посмотреть логи API:
+
+```bash
+docker compose logs -f api
+```
+
+Посмотреть логи фонового обработчика:
+
+```bash
+docker compose logs -f worker
+```
+
+Если сервисы в `docker-compose.yml` называются иначе, используйте соответствующие имена.
+
+### 3. Проверка API
+
+После запуска API доступен по адресу:
+
+- Swagger UI: http://localhost:8000/docs
+- OpenAPI: http://localhost:8000/openapi.json
+
+Основной endpoint:
+
+```http
+GET /prices/{ticker}
+```
+
+Примеры запросов:
+
+```http
+GET http://localhost:8000/prices/btc_usd
+GET http://localhost:8000/prices/eth_usd
+```
+
+Endpoint возвращает сохранённые в базе данных записи для указанного тикера.
+
+Пример структуры ответа:
+
+```json
+{
+  "data": [
+    {
+      "ticker": "btc_usd",
+      "price": 82200.12345678,
+      "timestamp": 1792152000
+    }
+  ]
+}
+```
+
+Значения приведены для примера. Фактический ответ зависит от данных в PostgreSQL и схемы ответа приложения.
+
+Если для тикера нет записей, результат зависит от реализации endpoint.
+
+### 4. Фоновые задачи
+
+Celery Worker выполняет задачу получения и сохранения цен, а Celery Beat запускает её по расписанию.
+
+Сервис получает данные через публичный API Deribit для следующих индексов:
+
+- `btc_usd` — индекс BTC/USD.
+- `eth_usd` — индекс ETH/USD.
+
+Согласно текущему расписанию, сбор данных выполняется раз в минуту.
+
+После запуска контейнеров проверьте логи Worker и Beat, чтобы убедиться, что задачи выполняются и записи сохраняются в PostgreSQL.
+
+### 5. Остановка проекта
+
+Остановить контейнеры:
+
+```bash
+docker compose down
+```
+
+Остановить контейнеры и удалить тома с данными:
+
+```bash
+docker compose down -v
+```
+
+**Внимание:** второй вариант удаляет тома Docker Compose, включая том PostgreSQL, если он настроен в проекте. Используйте его только при необходимости полностью сбросить данные.
+
+## Структура проекта
+
+Основные компоненты проекта:
+
+- `src/api/` — FastAPI-приложение и HTTP endpoints.
+- `src/worker.py` — конфигурация Celery и фоновые задачи.
+- `src/models.py` — модели SQLAlchemy.
+- `src/client.py` — получение данных из API Deribit.
+- `docker-compose.yml` — конфигурация сервисов.
+- `Dockerfile` — сборка образа приложения.
+- `pyproject.toml` — зависимости и настройки проекта.
+- `uv.lock` — зафиксированные версии зависимостей.
+- `.env.example` — пример переменных окружения.
+- `.env` — локальная конфигурация, не предназначенная для публикации.
+
+Фактическая структура может отличаться в зависимости от расположения модулей в репозитории.
+
+## Используемые сервисы
+
+| Сервис | Назначение |
+|---|---|
+| API | Обработка HTTP-запросов |
+| Worker | Выполнение фоновых задач |
+| Beat | Периодический запуск задач |
+| PostgreSQL | Хранение цен |
+| Redis | Брокер сообщений Celery |
+
+
+

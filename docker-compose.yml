@@ -2,13 +2,13 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15
+    image: postgres:17
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
       POSTGRES_DB: mydb
     ports:
-      - "5432:5432"
+      - "1111:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
 
@@ -19,26 +19,40 @@ services:
 
   api:
     build: .
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    command: uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
     environment:
-      - DATABASE_URL=postgresql+psycopg2://user:password@db:5432/mydb
+      - DATABASE_URL=postgresql+psycopg2://postgres:admin@db:5432/mydb
     depends_on:
       - db
+    ports:
+      - "8000:8000"
 
-  worker:
+  beat:
     build: .
-    command: celery -A src.worker.celery_app worker --loglevel=info
+    command: uv run celery -A src.worker.celery_app beat --loglevel=info
     volumes:
       - .:/app
     environment:
-      - DATABASE_URL=postgresql+psycopg2://user:password@db:5432/mydb
+      - DATABASE_URL=postgresql+psycopg2://postgres:admin@db:5432/mydb
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       - db
       - redis
-
+  worker:
+    build: .
+    command: uv run celery -A src.worker.celery_app worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:admin@db:5432/mydb
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+      
 volumes:
   pg_data:

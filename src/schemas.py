@@ -1,14 +1,13 @@
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, ConfigDict
+
 
 class PriceRecord(BaseModel):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
+
     ticker: str
     price: float
     timestamp: int
 
-    class Config:
-        orm_mode = True
 
 class PricesResponse(BaseModel):
-    data: List[PriceRecord]
+    data: list[PriceRecord]

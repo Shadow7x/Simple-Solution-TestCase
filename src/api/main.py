@@ -1,18 +1,24 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+import os
+
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from load_dotenv import load_dotenv
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.orm import declarative_base
-from . import models, schemas
+from sqlalchemy.orm import Session, sessionmaker
+
+from src.models import Base, TickerPrice
+from src.schemas import PriceRecord, PricesResponse
+
+load_dotenv()
 
 app = FastAPI(title="Deribit Price API")
 
-# Database setup
-engine = create_engine("postgresql+psycopg2://user:password@localhost:5432/mydb")
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-# Create tables
+db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:admin@db:5432/mydb")
+engine = create_engine(db_url)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 Base.metadata.create_all(bind=engine)
+
 
 def get_db():
     db = SessionLocal()
@@ -21,31 +27,51 @@ def get_db():
     finally:
         db.close()
 
-@app.get("/prices/{ticker}", response_model=schemas.PricesResponse)
-def get_prices(ticker: str = Query(..., description="Ticker symbol, e.g., btc_usd"), db: Session = Depends(get_db)):
-    stmt = select(models.TickerPrice).where(models.TickerPrice.ticker == ticker)
+
+@app.get("/prices/{ticker}", response_model=PricesResponse)
+def get_prices(
+    ticker: str = Path(..., description="Ticker symbol, e.g., btc_usd"),
+    db: Session = Depends(get_db),
+):
+    stmt = select(TickerPrice).where(TickerPrice.ticker == ticker)
     results = db.execute(stmt).scalars().all()
     if not results:
         raise HTTPException(status_code=404, detail="No data found for ticker")
-    return schemas.PricesResponse(data=results)
+    return PricesResponse(data=results)
 
-@app.get("/prices/latest/{ticker}", response_model=schemas.PriceRecord)
-def get_latest_price(ticker: str = Query(..., description="Ticker symbol"), db: Session = Depends(get_db)):
-    stmt = select(models.TickerPrice).where(models.TickerPrice.ticker == ticker).order_by(models.TickerPrice.timestamp.desc()).limit(1)
+
+@app.get("/prices/latest/{ticker}", response_model=PriceRecord)
+def get_latest_price(
+    ticker: str = Path(..., description="Ticker symbol"), db: Session = Depends(get_db)
+):
+    stmt = (
+        select(TickerPrice)
+        .where(TickerPrice.ticker == ticker)
+        .order_by(TickerPrice.timestamp.desc())
+        .limit(1)
+    )
     result = db.execute(stmt).scalar_one_or_none()
     if result is None:
         raise HTTPException(status_code=404, detail="No data found for ticker")
-    return schemas.PriceRecord(**result.__dict__)
+    return PriceRecord(**result.__dict__)
 
-@app.get("/prices/history/{ticker}", response_model=schemas.PricesResponse)
-def get_price_history(ticker: str = Query(..., description="Ticker symbol"), date: str = Query(..., description="Date in YYYY-MM-DD format"), db: Session = Depends(get_db)):
+
+@app.get("/prices/history/{ticker}", response_model=PricesResponse)
+def get_price_history(
+    ticker: str = Path(..., description="Ticker symbol"),
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    db: Session = Depends(get_db),
+):
     from datetime import datetime
+
     try:
         date_obj = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
     start_ts = int(datetime.combine(date_obj, datetime.min.time()).timestamp())
     end_ts = int(datetime.combine(date_obj, datetime.max.time()).timestamp())
-    stmt = select(models.TickerPrice).where(models.TickerPrice.ticker == ticker, models.TickerPrice.timestamp.between(start_ts, end_ts))
+    stmt = select(TickerPrice).where(
+        TickerPrice.ticker == ticker, TickerPrice.timestamp.between(start_ts, end_ts)
+    )
     results = db.execute(stmt).scalars().all()
-    return schemas.PricesResponse(data=results)
+    return PricesResponse(data=results)
